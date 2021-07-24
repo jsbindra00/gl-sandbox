@@ -66,9 +66,9 @@ namespace nr {
 		public:
 			Camera()
 				:viewMatrix_(glm::mat4(1.0f)) {
-				cameraPosition_ = glm::vec3(2.0f, 3.0f, 2.0f);
+				cameraPosition_ = glm::vec3(0.0f, 1.0f, 1.0f);
 				cameraUp_ = glm::vec3(0.0f, 1.0f, 0.0f);
-				cameraFront_ = glm::vec3(-0.25f, -0.5f, -1.0f);
+				cameraFront_ = glm::vec3(0.0f, -0.5f, -1.0f);
 			}
 
 			void MoveNorth() {
@@ -310,7 +310,9 @@ namespace nr {
 		GLuint VBO_;
 		GLuint EBO_;
 		bool wireframeMode_ = true;
-		constexpr unsigned int NUM_POINTS = 1000;
+		unsigned int NUM_POINTS = 4;
+
+
 
 		namespace init {
 			inline bool InitContext() {
@@ -329,41 +331,57 @@ namespace nr {
 
 
 			}
-			void InitArrays() {
-				// store a single VAO, which stores a single VBO for all particles.
-				glGenVertexArrays(1, &VAO_);
-				glGenBuffers(1, &VBO_);
-				// bind the VAO
-				glBindVertexArray(VAO_);
-
-				// generate the particles
-				constexpr unsigned int NUM_COMPONENTS_PER_VERTEX = 6;
-				float SPAN_X = 2 * 3.14159;
-
-				// each points has 6 attribs
-					// x y z r g b
-
-				std::vector<float> vertices;
-
-	
-				for (unsigned int i = 0; i < NUM_POINTS; ++i) {
 
 
-					float x = (i / static_cast<float>(NUM_POINTS)) * SPAN_X;
-					vertices.push_back(x); // x
-					vertices.push_back(0); // y
-					vertices.push_back(0); // z
 
-					
-					HSV::RGB col = HSV::HSVtoRGB((i / static_cast<float>(NUM_POINTS)) * 360, 100, 100);
-		
-					vertices.push_back(col.r / 255);
-					vertices.push_back(col.g / 255);
-					vertices.push_back(col.b / 255);
+			
+
+			void InitMesh(std::vector<float>& vertices, std::vector<unsigned int>& indices) {
+				float BOX_WIDTH = 0.5;
+				float BOX_HEIGHT = 0.5;
+
+				unsigned int N_WIDTH = 10;
+				unsigned int N_HEIGHT = 10;
+
+				NUM_POINTS = N_WIDTH * N_HEIGHT;
+
+				
+
+				// render the vertices
+				for (unsigned int j = 0; j < N_HEIGHT; ++j) {
+					for (unsigned int i = 0; i < N_WIDTH; ++i) {
+
+						vertices.push_back(i * N_WIDTH * BOX_WIDTH);
+						vertices.push_back(0);
+						vertices.push_back(j * BOX_HEIGHT * N_HEIGHT);
+					}
 				}
 
 
-				
+				for (unsigned int j = 0; j < N_HEIGHT; ++j) {
+					for (unsigned int i = 0; i < N_WIDTH; ++i) {
+						indices.push_back(j*N_WIDTH + i);
+					}
+				}
+			}
+			void InitArrays() {
+
+				std::vector<float> vertices;
+				std::vector<unsigned int> indices;
+
+				InitMesh(vertices, indices);
+
+				// store a single VAO, which stores a single VBO for all particles.
+				glGenVertexArrays(1, &VAO_);
+				// bind the VAO
+				glBindVertexArray(VAO_);
+
+				// generate a VBO handle
+				glGenBuffers(1, &VBO_);
+
+				// generate an EBO handle
+				glGenBuffers(1, &EBO_);
+
 				// copy the data into the VBO
 				// bind the VBO
 				glBindBuffer(GL_ARRAY_BUFFER, VBO_);
@@ -374,15 +392,22 @@ namespace nr {
 				// bind the vertex attrib pointers.
 
 				// bind the position
-				glVertexAttribPointer(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::POSITION), 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void*)0);
+				glVertexAttribPointer(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::POSITION), 3, GL_FLOAT, GL_FALSE, sizeof(float) * 3, (void*)0);
 
 				// bind the color
 
-				glVertexAttribPointer(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::COLOR), 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void*)(3*sizeof(float)));
+				//glVertexAttribPointer(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::COLOR), 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void*)(3*sizeof(float)));
 
 				// enable the vertex attributes
 				glEnableVertexAttribArray(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::POSITION));
-				glEnableVertexAttribArray(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::COLOR));
+				//glEnableVertexAttribArray(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::COLOR));
+
+
+				// bind the ebo.
+				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO_);
+
+				// copy the index data into the ebo.
+				glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size()*sizeof(float), indices.data(), GL_STATIC_DRAW);
 
 				std::cout << "done" << std::endl;
 			}
@@ -426,15 +451,12 @@ namespace nr {
 			shaderProgram_->SetUniformFloat("amplitude", 1);
 			shaderProgram_->SetUniformFloat("particleCount", NUM_POINTS);
 
-			shaderProgram2_->Use();
-			shaderProgram2_->SetUniformMat4("projectionMatrix", projectionMatrix_);
-			shaderProgram2_->SetUniformFloat("amplitude", 1);
-			shaderProgram2_->SetUniformFloat("particleCount", NUM_POINTS);
 
 			int frameNumber = 0;
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 			while (!glfwWindowShouldClose(window_)) {
 				// clear the screen
-				glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
+				glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 				glClear(GL_COLOR_BUFFER_BIT);
 
 
@@ -446,14 +468,13 @@ namespace nr {
 				shaderProgram_->SetUniformMat4("viewMatrix", viewMatrix_);
 				shaderProgram_->SetUniformFloat("frameNumber", frameNumber);
 
+
+			
 				glBindVertexArray(VAO_);
+				//glDrawArrays(GL_TRIANGLES, 0, 4);
+				glDrawElements(GL_LINE_LOOP, NUM_POINTS, GL_UNSIGNED_INT, 0);
 
-				glDrawArrays(GL_LINE_STRIP, 0, NUM_POINTS);
-
-				shaderProgram2_->Use();
-				shaderProgram2_->SetUniformMat4("viewMatrix", viewMatrix_);
-				shaderProgram2_->SetUniformFloat("frameNumber", frameNumber);
-				glDrawArrays(GL_LINE_STRIP, 0, NUM_POINTS);
+	
 
 
 				glfwPollEvents();
