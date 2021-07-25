@@ -5,11 +5,11 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 #include <string>
-#include <random>
 #include <fstream>
 #include <sstream>
 #include "HSV.h"
-#include <SFML/Graphics.hpp>
+#include "Geometry.h"
+#include <algorithm>
 
 
 
@@ -26,18 +26,12 @@ namespace nr {
 			vShaderFile.close();
 			return vShaderStream.str();
 		}
-		sf::Image LoadImage(const std::string& fileName) {
-			sf::Image img;
-			if (img.loadFromFile(fileName)) {
-				return img;
-			}
-			throw std::exception();
-		}
+	
 	}
 	namespace driver {
 		GLFWwindow* window_;
 		const unsigned int WINDOWWIDTH = 500;
-		unsigned int WINDOWHEIGHT = 500;
+		const unsigned int WINDOWHEIGHT = 500;
 		bool wireframeMode_ = false;
 
 		enum class VERTEXATTRIBUTE : GLuint {
@@ -46,9 +40,10 @@ namespace nr {
 		};
 		class Camera {
 		private:
-			float pitch{ 0 };
-			float yaw{ 90 };
-			float roll{ 0 };
+			float pitch_{ 0 };
+			float yaw_{ 90 };
+			float roll_{ 0 };
+			float eulerSensitivity_ = 0.1;
 
 			glm::vec2 lastMousePosition_;
 			glm::vec2 mousePosition_;
@@ -61,32 +56,36 @@ namespace nr {
 			const float eulerSpeed_ = 4;
 
 			void UpdateRotation() {
-				if (pitch > 89.0f)
-					pitch = 89.0f;
-				if (pitch < -89.0f)
-					pitch = -89.0f;
+			
+				if (pitch_ > 89.0f)
+					pitch_ = 89.0f;
+				if (pitch_ < -89.0f)
+					pitch_ = -89.0f;
+
 				glm::vec3 direction = glm::vec3(
-				
-					cos(glm::radians(yaw)) * cos(glm::radians(pitch)),
-					sin(glm::radians(pitch)),
-					sin(glm::radians(yaw)) * cos(glm::radians(pitch))
+					cos(glm::radians(yaw_)) * cos(glm::radians(pitch_)),
+					sin(glm::radians(pitch_)),
+					sin(glm::radians(yaw_)) * cos(glm::radians(pitch_))
 				);
 				cameraFront_ = glm::normalize(direction);
 			}
 		public:
 			Camera()
-				:cameraPosition_(glm::vec3(5.0f, 100.0f, 10.0f)),
+				:cameraPosition_(glm::vec3(1.0f, 0.0f, -10.0f)),
 				cameraUp_(glm::vec3(0.0f, 1.0f, 0.0f)),
-				cameraFront_(glm::vec3(-2.0f, -2.0f, -1.0f)){
+				cameraFront_(glm::vec3(0.0f, 0.0f, -1.0f)),
+				mousePosition_(nr::driver::WINDOWWIDTH / 2, nr::driver::WINDOWHEIGHT / 2),
+				lastMousePosition_(nr::driver::WINDOWWIDTH / 2, nr::driver::WINDOWHEIGHT / 2){
 				UpdateRotation();
 			}
 			inline void UpdateMousePosition(const glm::vec2& vec) {
 				lastMousePosition_ = mousePosition_;
 				mousePosition_ = vec;
-				float sensitivity = 0.8;
-				glm::vec2 offset = (mousePosition_ - lastMousePosition_)*sensitivity;
-				yaw += offset.x;
-				pitch -= offset.y;
+				float sensitivity = 1;
+				glm::vec2 offset = (mousePosition_ - lastMousePosition_) * sensitivity;
+
+				yaw_ += offset.x;
+				pitch_ -= offset.y;
 				UpdateRotation();
 			}
 			inline void MoveNorth() {
@@ -100,6 +99,17 @@ namespace nr {
 			}
 			inline void MoveEast() {
 				cameraPosition_ -= cameraSpeed_ * glm::normalize(glm::cross(cameraFront_, cameraUp_));
+			}
+
+
+			inline void LookRight() {
+			
+				yaw_ += 20;
+				UpdateRotation();
+			}
+			inline void LookLeft() {
+				yaw_ -= 20;
+				UpdateRotation();
 			}
 			inline glm::vec3 Position() const noexcept { return cameraPosition_; }
 			inline glm::vec3 Up() const noexcept { return cameraUp_; }
@@ -225,6 +235,11 @@ namespace nr {
 				nr::driver::camera_->MoveWest();
 				break;
 			}
+			case GLFW_KEY_RIGHT:
+			{
+				nr::driver::camera_->LookRight();
+				break;
+			}
 			}
 		}
 		void CursorPosCallback(GLFWwindow* window, double xPos, double yPos) {
@@ -251,70 +266,28 @@ namespace nr {
 				nr::driver::window_ = glfwCreateWindow(width, height, title, NULL, NULL);
 				return nr::driver::window_;
 			}
-			inline void InitCallbacks() {
+			void InitCallbacks() {
 				glfwSetKeyCallback(nr::driver::window_, &nr::callbacks::KeyCallback);
 				glfwSetCursorPosCallback(nr::driver::window_, nr::callbacks::CursorPosCallback);
 			}
-			void InitMesh(std::vector<float>& vertices, std::vector<unsigned int>& indices) {
-				// load up the height map 
-				sf::Image heightMap = nr::util::LoadImage("watts.jfif");
-				sf::Vector2u mapDim{ heightMap.getSize() };
-
-				// generate a X-Z vertex plane
-				const float VERTEX_X_SPACE = 1;
-				const float VERTEX_Z_SPACE = 1;
-				const float MAX_Y = pow(2, 4.5);
-
-				const sf::Uint8* pxls = heightMap.getPixelsPtr();
-				for (unsigned int j = 0; j < mapDim.y; ++j) {
-					for (unsigned int i = 0; i < mapDim.x; ++i) {
-						sf::Color col = heightMap.getPixel(i, j);
-						auto colavg = (col.r + col.g + col.b) / static_cast<float>((255 * 3));
-						float y = MAX_Y * colavg;
-						vertices.insert(vertices.end(),
-							{ i * VERTEX_X_SPACE,
-							y ,
-							j * VERTEX_Z_SPACE
-							});
-						HSV::RGB vertexCol{ HSV::HSVtoRGB((360 * y / MAX_Y), 100, 100) };
-						vertices.insert(vertices.end(),
-							{
-								vertexCol.r / 255 ,
-								vertexCol.g / 255,
-								vertexCol.b / 255
-							});
-					}
+			void InitShapes(std::vector<float>& vertices, std::vector<unsigned int>& indices) {
+				nr::geometry::Cube cube1(glm::vec3(0.0f, 0.0f, 0.0f), 1.0f);
+				for (const glm::vec3& vertex : cube1.vertices) {
+					vertices.insert(vertices.end(),
+						{
+							vertex.x,
+							vertex.y,
+							vertex.z
+						});
 				}
-				for (unsigned int j = 0; j < mapDim.y - 1; ++j) {
-					for (unsigned int i = 0; i < mapDim.x - 1; ++i) {
-						unsigned int index = j * mapDim.x + i;
-						indices.push_back(index);
-						indices.push_back(index + 1);
-						if (i % 2 == 0) {
-							indices.insert(indices.end(),
-								{
-									index + mapDim.x + 1,
-									index,
-									index + mapDim.x,
-									index + mapDim.x + 1
-								});
-							continue;
-						}
-						indices.insert(indices.end(),
-							{
-								index + mapDim.x,
-								index + mapDim.x,
-								index + mapDim.x + 1,
-								index + 1
-							});
-					}
-				}
+				indices.insert(indices.end(), cube1.indices.begin(), cube1.indices.end());
+
 			}
 			void InitArrays() {
 				std::vector<float> vertices;
 				std::vector<unsigned int> indices;
 
-				InitMesh(vertices, indices);
+				InitShapes(vertices, indices);
 				glGenVertexArrays(1, &VAO_);
 				glBindVertexArray(VAO_);
 
@@ -327,9 +300,9 @@ namespace nr {
 				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO_);
 				glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(float), indices.data(), GL_STATIC_DRAW);
 
-				glVertexAttribPointer(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::POSITION), 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void*)0);
-				glVertexAttribPointer(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::COLOR), 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void*)(3 * sizeof(float)));
-				glEnableVertexAttribArray(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::COLOR));
+				glVertexAttribPointer(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::POSITION), 3, GL_FLOAT, GL_FALSE, sizeof(float) * 3, (void*)0);
+				//glVertexAttribPointer(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::COLOR), 3, GL_FLOAT, GL_FALSE, sizeof(float) * 3, (void*)(3 * sizeof(float)));
+				//glEnableVertexAttribArray(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::COLOR));
 				glEnableVertexAttribArray(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::POSITION));
 			}
 			void InitShaders() {
@@ -349,7 +322,7 @@ namespace nr {
 		void Render() {
 			shaderProgram_->Use();
 			projectionMatrix_ = glm::mat4(1.0f);
-			projectionMatrix_ = glm::perspective(glm::radians(45.0f), (float)1000 / (float)1000, 0.1f, 10000.0f);
+			projectionMatrix_ = glm::perspective(glm::radians(45.0f), (float)nr::driver::WINDOWWIDTH / (float)nr::driver::WINDOWHEIGHT, 0.1f, 10000.0f);
 			shaderProgram_->SetUniformMat4("projectionMatrix", projectionMatrix_);
 
 			int frameNumber = 0;
@@ -362,10 +335,9 @@ namespace nr {
 
 				shaderProgram_->Use();
 				shaderProgram_->SetUniformMat4("viewMatrix", viewMatrix_);
-				shaderProgram_->SetUniformFloat("time", glfwGetTime());
 
 				glBindVertexArray(VAO_);
-				glDrawElements(GL_TRIANGLES, 1000*1000, GL_UNSIGNED_INT, 0);
+				glDrawElements(GL_TRIANGLES, 8, GL_UNSIGNED_INT, 0);
 
 				glfwPollEvents();
 				glfwSwapBuffers(window_);
