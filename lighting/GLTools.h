@@ -43,7 +43,10 @@ namespace nr {
 			float pitch_{ 0 };
 			float yaw_{ 90 };
 			float roll_{ 0 };
-			float eulerSensitivity_ = 0.1;
+
+			float eulerSensitivity_ = 0.5;
+			const float cameraSpeed_ = 2;
+			const float eulerSpeed_ = 4;
 
 			glm::vec2 lastMousePosition_;
 			glm::vec2 mousePosition_;
@@ -52,8 +55,7 @@ namespace nr {
 			glm::vec3 cameraFront_;
 			glm::vec3 cameraUp_;
 
-			const float cameraSpeed_ = 15;
-			const float eulerSpeed_ = 4;
+
 
 			void UpdateRotation() {
 			
@@ -81,8 +83,7 @@ namespace nr {
 			inline void UpdateMousePosition(const glm::vec2& vec) {
 				lastMousePosition_ = mousePosition_;
 				mousePosition_ = vec;
-				float sensitivity = 1;
-				glm::vec2 offset = (mousePosition_ - lastMousePosition_) * sensitivity;
+				glm::vec2 offset = (mousePosition_ - lastMousePosition_) * eulerSensitivity_;
 
 				yaw_ += offset.x;
 				pitch_ -= offset.y;
@@ -254,6 +255,7 @@ namespace nr {
 		GLuint VAO_;
 		GLuint VBO_;
 		GLuint EBO_;
+		unsigned int INDEXCOUNT;
 		namespace init {
 			inline bool InitContext() {
 				glfwMakeContextCurrent(nr::driver::window_);
@@ -271,17 +273,19 @@ namespace nr {
 				glfwSetCursorPosCallback(nr::driver::window_, nr::callbacks::CursorPosCallback);
 			}
 			void InitShapes(std::vector<float>& vertices, std::vector<unsigned int>& indices) {
-				nr::geometry::Cube cube1(glm::vec3(0.0f, 0.0f, 0.0f), 1.0f);
-				for (const glm::vec3& vertex : cube1.vertices) {
-					vertices.insert(vertices.end(),
-						{
-							vertex.x,
-							vertex.y,
-							vertex.z
-						});
-				}
-				indices.insert(indices.end(), cube1.indices.begin(), cube1.indices.end());
 
+				std::array<nr::geometry::Cube, 2> cubes = {
+				nr::geometry::Cube (glm::vec3(0.0f, 0.0f, 0.0f), 1.0f),
+				nr::geometry::Cube (glm::vec3(3.0f, 1.0f, -1.0f), 1.0f)
+				};
+				for (int i = 0; i < cubes.size(); ++i) {
+					nr::geometry::Cube& cube{ cubes.at(i) };
+					vertices.insert(vertices.end(), cube.vertices.begin(), cube.vertices.end());
+					std::transform(cube.indices.begin(), cube.indices.end(), std::back_inserter(indices), [i](unsigned int index) mutable{
+						return index + (i * nr::geometry::Cube::VertexCount());
+					});
+				}
+				nr::driver::INDEXCOUNT = indices.size();
 			}
 			void InitArrays() {
 				std::vector<float> vertices;
@@ -337,7 +341,7 @@ namespace nr {
 				shaderProgram_->SetUniformMat4("viewMatrix", viewMatrix_);
 
 				glBindVertexArray(VAO_);
-				glDrawElements(GL_TRIANGLES, 8, GL_UNSIGNED_INT, 0);
+				glDrawElements(GL_TRIANGLES, nr::driver::INDEXCOUNT, GL_UNSIGNED_INT, 0);
 
 				glfwPollEvents();
 				glfwSwapBuffers(window_);
