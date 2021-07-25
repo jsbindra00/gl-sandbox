@@ -10,6 +10,7 @@
 #include "HSV.h"
 #include "Geometry.h"
 #include <algorithm>
+#include "LightSource.h"
 
 
 
@@ -26,17 +27,17 @@ namespace nr {
 			vShaderFile.close();
 			return vShaderStream.str();
 		}
-	
 	}
 	namespace driver {
 		GLFWwindow* window_;
 		const unsigned int WINDOWWIDTH = 500;
 		const unsigned int WINDOWHEIGHT = 500;
 		bool wireframeMode_ = false;
-
+		bool mouseActive_ = true;
 		enum class VERTEXATTRIBUTE : GLuint {
 			POSITION = 0,
 			COLOR = 1,
+			NORMAL
 		};
 		class Camera {
 		private:
@@ -45,7 +46,7 @@ namespace nr {
 			float roll_{ 0 };
 
 			float eulerSensitivity_ = 0.5;
-			const float cameraSpeed_ = 2;
+			const float cameraSpeed_ = 1;
 			const float eulerSpeed_ = 4;
 
 			glm::vec2 lastMousePosition_;
@@ -54,7 +55,6 @@ namespace nr {
 			glm::vec3 cameraPosition_;
 			glm::vec3 cameraFront_;
 			glm::vec3 cameraUp_;
-
 
 
 			void UpdateRotation() {
@@ -220,6 +220,12 @@ namespace nr {
 				else glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 				break;
 			}
+			case GLFW_KEY_ESCAPE:{
+				if (glfwGetKey(window, GLFW_KEY_ESCAPE) != GLFW_PRESS) break;
+				nr::driver::mouseActive_ = !nr::driver::mouseActive_;
+
+				break;
+			}
 			case GLFW_KEY_S:{
 				nr::driver::camera_->MoveSouth();
 				break;
@@ -244,15 +250,19 @@ namespace nr {
 			}
 		}
 		void CursorPosCallback(GLFWwindow* window, double xPos, double yPos) {
+			if (!nr::driver::mouseActive_) return;
 			nr::driver::camera_->UpdateMousePosition({ xPos, yPos });
 		}
 	}
 }
 namespace nr {
 	namespace driver {
-		std::unique_ptr<nr::driver::Program> shaderProgram_;
+		std::unique_ptr<nr::driver::Program> geometryProgram_;
+		std::unique_ptr<nr::driver::Program> lightingProgram_;
+
 		glm::mat4 projectionMatrix_;
 		GLuint VAO_;
+		GLuint lightVAO_;
 		GLuint VBO_;
 		GLuint EBO_;
 		unsigned int INDEXCOUNT;
@@ -273,10 +283,8 @@ namespace nr {
 				glfwSetCursorPosCallback(nr::driver::window_, nr::callbacks::CursorPosCallback);
 			}
 			void InitShapes(std::vector<float>& vertices, std::vector<unsigned int>& indices) {
-
-				std::array<nr::geometry::Cube, 2> cubes = {
+				std::array<nr::geometry::Cube, 1> cubes = {
 				nr::geometry::Cube (glm::vec3(0.0f, 0.0f, 0.0f), 1.0f),
-				nr::geometry::Cube (glm::vec3(3.0f, 1.0f, -1.0f), 1.0f)
 				};
 				for (int i = 0; i < cubes.size(); ++i) {
 					nr::geometry::Cube& cube{ cubes.at(i) };
@@ -286,6 +294,8 @@ namespace nr {
 					});
 				}
 				nr::driver::INDEXCOUNT = indices.size();
+				// specify a normal for a face.
+					//
 			}
 			void InitArrays() {
 				std::vector<float> vertices;
@@ -308,27 +318,53 @@ namespace nr {
 				//glVertexAttribPointer(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::COLOR), 3, GL_FLOAT, GL_FALSE, sizeof(float) * 3, (void*)(3 * sizeof(float)));
 				//glEnableVertexAttribArray(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::COLOR));
 				glEnableVertexAttribArray(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::POSITION));
+
+
+				// create a new VAO for the lighting, with the same VBO. same data, different interpretation.
+				glGenVertexArrays(1, &lightVAO_);
+				glBindVertexArray(lightVAO_);
+
+				glBindBuffer(GL_ARRAY_BUFFER, VBO_);
+				glVertexAttribPointer(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::POSITION), 3, GL_FLOAT, GL_FALSE, sizeof(float) * 3, (void*)0);
+				glEnableVertexAttribArray(static_cast<GLuint>(nr::driver::VERTEXATTRIBUTE::POSITION));
+
+
 			}
 			void InitShaders() {
-				shaderProgram_ = std::make_unique<nr::driver::Program>();
-				shaderProgram_->RegisterShader(std::make_unique<nr::driver::Shader>(GL_VERTEX_SHADER, "vertexShader", "vertexShader.vert"));
-				shaderProgram_->RegisterShader(std::make_unique<nr::driver::Shader>(GL_FRAGMENT_SHADER, "fragmentShader", "fragmentShader.frag"));
+				geometryProgram_ = std::make_unique<nr::driver::Program>();
+				geometryProgram_->RegisterShader(std::make_unique<nr::driver::Shader>(GL_VERTEX_SHADER, "vertexShader", "vertexShader.vert"));
+				geometryProgram_->RegisterShader(std::make_unique<nr::driver::Shader>(GL_FRAGMENT_SHADER, "fragmentShader", "fragmentShader.frag"));
+
+				lightingProgram_ = std::make_unique<nr::driver::Program>();
+				lightingProgram_->RegisterShader(std::make_unique<nr::driver::Shader>(GL_VERTEX_SHADER, "lightingVertexShader", "vertexShader.vert"));
+				lightingProgram_->RegisterShader(std::make_unique<nr::driver::Shader>(GL_FRAGMENT_SHADER, "fragmentShader", "lightSourceFragmentShader.frag"));
+
+
+
 			}
 			bool InitProgram(const unsigned int& windowWidth, const unsigned int& windowHeight, const char* windowName) {
 				if (!glfwInit() || !InitWindow(windowWidth, windowHeight, windowName) || !InitContext()) return false;
 				InitCallbacks();
 				InitArrays();
 				InitShaders();
-				shaderProgram_->Run();
+				geometryProgram_->Run();
+				lightingProgram_->Run();
 				return gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 			}
 		}
 		void Render() {
-			shaderProgram_->Use();
+			geometryProgram_->Use();
 			projectionMatrix_ = glm::mat4(1.0f);
 			projectionMatrix_ = glm::perspective(glm::radians(45.0f), (float)nr::driver::WINDOWWIDTH / (float)nr::driver::WINDOWHEIGHT, 0.1f, 10000.0f);
-			shaderProgram_->SetUniformMat4("projectionMatrix", projectionMatrix_);
+			geometryProgram_->SetUniformMat4("projectionMatrix", projectionMatrix_);
+			geometryProgram_->SetUniformFloat("ambientScale", 0.7f);
 
+
+			nr::lighting::LightSource lightSource_;
+			lightSource_.color_ = glm::vec3(1.0f, 1.0f, 1.0f);
+
+
+			
 			int frameNumber = 0;
 			while (!glfwWindowShouldClose(window_)) {
 				glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
@@ -336,12 +372,33 @@ namespace nr {
 
 				glm::mat4 viewMatrix_ = glm::mat4(1.0f);
 				viewMatrix_ = glm::lookAt(camera_->Position(), camera_->Position() + camera_->Front(), camera_->Up());
+				glm::mat4 modelMatrix_ = glm::mat4(1.0f);
 
-				shaderProgram_->Use();
-				shaderProgram_->SetUniformMat4("viewMatrix", viewMatrix_);
+				// props.
+				geometryProgram_->Use();
+				geometryProgram_->SetUniformMat4("viewMatrix", viewMatrix_);
+				geometryProgram_->SetUniformMat4("modelMatrix", modelMatrix_);
 
+				geometryProgram_->SetUniformVec3("objectColor", { 0.2f, 0.7f, 0.0f });
+
+				const float radius{ 50 };
+				const float frequency{ 0.0000000001 };
+				lightSource_.position_ = glm::vec3(radius * sin(frequency + frameNumber / pow(2, 12)), 0, radius * cos(frequency + frameNumber / pow(2, 12)));
+				
+				geometryProgram_->SetUniformVec3("lightPosition", lightSource_.position_);
+				geometryProgram_->SetUniformVec3("lightColor", lightSource_.color_);
 				glBindVertexArray(VAO_);
-				glDrawElements(GL_TRIANGLES, nr::driver::INDEXCOUNT, GL_UNSIGNED_INT, 0);
+				glDrawElements(GL_TRIANGLES, nr::driver::INDEXCOUNT , GL_UNSIGNED_INT, (void*)(0 * sizeof(unsigned int)));
+
+				// lighting
+				lightingProgram_->Use();
+				modelMatrix_ = glm::translate(modelMatrix_, lightSource_.position_);
+				lightingProgram_->SetUniformMat4("modelMatrix", modelMatrix_);
+				geometryProgram_->SetUniformMat4("viewMatrix", viewMatrix_);
+				lightingProgram_->SetUniformMat4("projectionMatrix", projectionMatrix_);
+
+				glDrawElements(GL_TRIANGLES, nr::driver::INDEXCOUNT, GL_UNSIGNED_INT, (void*)(0 * sizeof(unsigned int)));
+
 
 				glfwPollEvents();
 				glfwSwapBuffers(window_);
